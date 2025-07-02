@@ -1,17 +1,27 @@
 'use client';
+
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { auth, db, storage } from '@/lib/firebaseConfig';
-import { onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged, User } from 'firebase/auth';
 import {
   doc, getDoc, addDoc, collection,
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
+interface PerfilUsuario {
+  nombre: string;
+  genero: string;
+  email: string;
+  zona?: string;
+  fumador?: boolean;
+  mascotas?: boolean;
+}
+
 export default function CompartirPisoPage() {
   const router = useRouter();
-  const [user, setUser] = useState<any>(null);
-  const [perfil, setPerfil] = useState<any>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [perfil, setPerfil] = useState<PerfilUsuario | null>(null);
 
   // Form fields
   const [titulo, setTitulo] = useState('');
@@ -34,26 +44,30 @@ export default function CompartirPisoPage() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    onAuthStateChanged(auth, async (u) => {
+    const unsub = onAuthStateChanged(auth, async (u) => {
       if (!u) return router.push('/login');
       setUser(u);
 
       const snap = await getDoc(doc(db, 'userProfiles', u.uid));
       if (snap.exists()) {
-        const data = snap.data();
+        const data = snap.data() as PerfilUsuario;
         setPerfil(data);
         setZona(data.zona || '');
         setFumador(data.fumador || false);
         setMascotas(data.mascotas || false);
       }
     });
+
+    return () => unsub();
   }, [router]);
 
   const handleImagenChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       setImagen(file);
-      setImagenPreview(URL.createObjectURL(file));
+      const reader = new FileReader();
+      reader.onloadend = () => setImagenPreview(reader.result as string);
+      reader.readAsDataURL(file);
     }
   };
 
@@ -67,14 +81,14 @@ export default function CompartirPisoPage() {
     setLoading(true);
     try {
       let imagenURL = '';
-      if (imagen) {
+      if (imagen && user) {
         const storageRef = ref(storage, `pisos/${user.uid}_${Date.now()}`);
         await uploadBytes(storageRef, imagen);
         imagenURL = await getDownloadURL(storageRef);
       }
 
       await addDoc(collection(db, 'pisosCompartidos'), {
-        uid: user.uid,
+        uid: user?.uid,
         titulo,
         descripcion,
         zona,
@@ -158,13 +172,23 @@ export default function CompartirPisoPage() {
           📸 Seleccionar imagen
         </label>
         {imagenPreview && (
-          <img src={imagenPreview} alt="preview" className="mt-2 rounded w-full h-48 object-cover" />
+          <img
+            src={imagenPreview}
+            alt="Vista previa del piso"
+            className="mt-2 rounded w-full h-48 object-cover"
+          />
+          // ⚠️ Puedes reemplazar <img> por next/image si prefieres:
+          // <Image src={imagenPreview} alt="Vista previa del piso" layout="responsive" width={400} height={300} className="mt-2 rounded object-cover" />
         )}
       </div>
 
       {error && <p className="text-red-600 mb-3">{error}</p>}
 
-      <button onClick={handlePublicar} disabled={loading} className={`w-full py-3 rounded text-white font-semibold ${loading ? 'bg-gray-400' : 'bg-green-600 hover:bg-green-700'}`}>
+      <button
+        onClick={handlePublicar}
+        disabled={loading}
+        className={`w-full py-3 rounded text-white font-semibold ${loading ? 'bg-gray-400' : 'bg-green-600 hover:bg-green-700'}`}
+      >
         {loading ? 'Publicando...' : 'Publicar Piso'}
       </button>
     </div>
